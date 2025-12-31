@@ -98,8 +98,13 @@ router.post("/feed", requireAdmin, async (req, res) => {
 
     // 2. Calculate next feeding (maintain sync: current_next + interval)
     const intervalHours = parseIntervalToHours(device.feeding_interval);
-    const currentNext = new Date(device.next_feeding_at || new Date());
-    const newNext = new Date(currentNext.getTime() + (intervalHours * 60 * 60 * 1000));
+    let newNext = new Date(device.next_feeding_at || new Date());
+    const now = new Date();
+
+    // Catch-up logic: ensure newNext is in the future
+    do {
+      newNext = new Date(newNext.getTime() + (intervalHours * 60 * 60 * 1000));
+    } while (newNext <= now);
 
     // 3. Update Last Fed and Next Feeding
     const { error: dbError } = await supabase
@@ -176,7 +181,14 @@ router.post("/feeding-settings", requireAdmin, async (req, res) => {
     if (interval) {
         const intervalHours = parseIntervalToHours(interval);
         const lastFed = new Date(device.last_fed_at || new Date());
-        updates.next_feeding_at = new Date(lastFed.getTime() + (intervalHours * 60 * 60 * 1000));
+        let newNext = new Date(lastFed.getTime() + (intervalHours * 60 * 60 * 1000));
+        const now = new Date();
+
+        // Catch-up logic: ensure newNext is in the future
+        while (newNext <= now) {
+            newNext = new Date(newNext.getTime() + (intervalHours * 60 * 60 * 1000));
+        }
+        updates.next_feeding_at = newNext;
     }
 
     // 3. Update settings and schedule
