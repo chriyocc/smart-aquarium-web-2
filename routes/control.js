@@ -11,6 +11,17 @@ const parseIntervalToHours = (intervalStr) => {
   return match ? parseInt(match[1], 10) : 4;
 };
 
+// Helper: Cancel any pending commands of a specific type (Superseding)
+const cancelPendingCommands = async (type) => {
+  const { error } = await supabase
+    .from('command_queue')
+    .update({ processed: true, processed_at: new Date() })
+    .eq('type', type)
+    .eq('processed', false);
+  
+  if (error) console.error(`Error canceling pending ${type} commands:`, error);
+};
+
 router.get("/latest", async (req, res) => {
   try {
     // Fetch the oldest unprocessed command
@@ -28,6 +39,21 @@ router.get("/latest", async (req, res) => {
     }
 
     if (!command) {
+      return res.json({ has_command: false });
+    }
+
+    // Expiration Logic: Check if command is older than 10 minutes
+    const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000);
+    const cmdTime = new Date(command.created_at);
+    
+    if (cmdTime < tenMinAgo) {
+      // Mark expired command as processed so we don't get it again
+      await supabase
+        .from('command_queue')
+        .update({ processed: true, processed_at: new Date() })
+        .eq('id', command.id);
+        
+      // Return empty for this poll (next poll will get the next valid one)
       return res.json({ has_command: false });
     }
 
@@ -71,6 +97,9 @@ router.post("/pump", requireAdmin, async (req, res) => {
   }
 
   // 2. Queue for ESP32 in command_queue table
+  // (Optimization) Supersede old PUMP commands
+  await cancelPendingCommands('PUMP');
+
   const { error: queueError } = await supabase
     .from('command_queue')
     .insert([{ type: 'PUMP', value: state }]);
@@ -118,6 +147,9 @@ router.post("/feed", requireAdmin, async (req, res) => {
     if (dbError) return res.status(500).json({ error: dbError.message });
 
     // 4. Queue command
+    // (Optimization) Supersede old FEED commands
+    await cancelPendingCommands('FEED');
+
     const { error: queueError } = await supabase
       .from('command_queue')
       .insert([{ type: 'FEED', value: 'NOW' }]);
@@ -144,6 +176,9 @@ router.post("/brightness", requireAdmin, async (req, res) => {
   if (dbError) return res.status(500).json({ error: dbError.message });
 
   // 2. Queue command
+  // (Optimization) Supersede old LIGHT commands
+  await cancelPendingCommands('LIGHT');
+
   const { error: queueError } = await supabase
     .from('command_queue')
     .insert([{ type: 'LIGHT', value: value }]);
@@ -200,6 +235,9 @@ router.post("/feeding-settings", requireAdmin, async (req, res) => {
     if (dbError) return res.status(500).json({ error: dbError.message });
 
     // 4. Queue CONFIG update for ESP32
+    // (Optimization) Supersede old CONFIG commands
+    await cancelPendingCommands('CONFIG');
+
     const { error: queueError } = await supabase
       .from('command_queue')
       .insert([{ 
