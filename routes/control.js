@@ -119,7 +119,7 @@ router.post("/feed", requireAdmin, async (req, res) => {
     // 1. Get current state to know the current schedule
     const { data: device, error: fetchError } = await supabase
       .from('device_state')
-      .select('next_feeding_at', 'feeding_interval')
+      .select('next_feeding_at, feeding_interval')
       .eq('id', '00000000-0000-0000-0000-000000000001')
       .single();
 
