@@ -125,15 +125,11 @@ router.post("/feed", requireAdmin, async (req, res) => {
 
     if (fetchError) return res.status(500).json({ error: fetchError.message });
 
-    // 2. Calculate next feeding (maintain sync: current_next + interval)
+    // 2. Calculate next feeding (Reset sync: NOW + interval)
+    // User prefers schedule to drift based on actual feeding time.
     const intervalHours = parseIntervalToHours(device.feeding_interval);
-    let newNext = new Date(device.next_feeding_at || new Date());
     const now = new Date();
-
-    // Catch-up logic: ensure newNext is in the future
-    do {
-      newNext = new Date(newNext.getTime() + (intervalHours * 60 * 60 * 1000));
-    } while (newNext <= now);
+    const newNext = new Date(now.getTime() + (intervalHours * 60 * 60 * 1000));
 
     // 3. Update Last Fed and Next Feeding
     const { error: dbError } = await supabase
