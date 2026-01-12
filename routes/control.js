@@ -4,12 +4,25 @@ import { supabase } from "../lib/supabase.js";
 
 const router = express.Router();
 
-// Helper to parse interval strings (e.g., '12h', '12 Hours') into hours
-const parseIntervalToHours = (intervalStr) => {
-  if (!intervalStr) return 4; // Default
-  const match = intervalStr.match(/(\d+)/);
-  return match ? parseInt(match[1], 10) : 4;
+// Helper to parse interval strings (e.g., '30s', '1m', '4h') into KEY milliseconds
+const parseIntervalToMs = (intervalStr) => {
+  if (!intervalStr) return 4 * 60 * 60 * 1000; // Default 4h
+
+  // Try to match value and unit
+  const match = intervalStr.match(/(\d+)([smh]?)/);
+  if (!match) return 4 * 60 * 60 * 1000;
+
+  const value = parseInt(match[1], 10);
+  const unit = match[2];
+
+  switch(unit) {
+    case 's': return value * 1000;
+    case 'm': return value * 60 * 1000;
+    case 'h': return value * 60 * 60 * 1000;
+    default: return value * 60 * 60 * 1000; // Default to hours if no unit (legacy)
+  }
 };
+
 
 // Helper: Cancel any pending commands of a specific type (Superseding)
 const cancelPendingCommands = async (type) => {
@@ -127,9 +140,9 @@ router.post("/feed", requireAdmin, async (req, res) => {
 
     // 2. Calculate next feeding (Reset sync: NOW + interval)
     // User prefers schedule to drift based on actual feeding time.
-    const intervalHours = parseIntervalToHours(device.feeding_interval);
+    const intervalMs = parseIntervalToMs(device.feeding_interval);
     const now = new Date();
-    const newNext = new Date(now.getTime() + (intervalHours * 60 * 60 * 1000));
+    const newNext = new Date(now.getTime() + intervalMs);
 
     // 3. Update Last Fed and Next Feeding
     const { error: dbError } = await supabase
@@ -210,14 +223,14 @@ router.post("/feeding-settings", requireAdmin, async (req, res) => {
 
     // 2. Recalculate next_feeding_at if interval changed
     if (interval) {
-        const intervalHours = parseIntervalToHours(interval);
+        const intervalMs = parseIntervalToMs(interval);
         const lastFed = new Date(device.last_fed_at || new Date());
-        let newNext = new Date(lastFed.getTime() + (intervalHours * 60 * 60 * 1000));
+        let newNext = new Date(lastFed.getTime() + intervalMs);
         const now = new Date();
 
         // Catch-up logic: ensure newNext is in the future
         while (newNext <= now) {
-            newNext = new Date(newNext.getTime() + (intervalHours * 60 * 60 * 1000));
+            newNext = new Date(newNext.getTime() + intervalMs);
         }
         updates.next_feeding_at = newNext;
     }
