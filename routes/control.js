@@ -37,6 +37,12 @@ const cancelPendingCommands = async (type) => {
 
 router.get("/latest", async (req, res) => {
   try {
+    // 0. (Heartbeat) Update Last Seen for Device ID 1
+    await supabase 
+      .from('device_state')
+      .update({ last_seen: new Date() })
+      .eq('id', '00000000-0000-0000-0000-000000000001');
+
     // Fetch the oldest unprocessed command
     const { data: command, error } = await supabase
       .from('command_queue')
@@ -212,28 +218,7 @@ router.post("/feeding-settings", requireAdmin, async (req, res) => {
       return res.status(400).json({ error: "No settings provided" });
     }
 
-    // 1. Get last_fed_at to recalculate the next move
-    const { data: device, error: fetchError } = await supabase
-      .from('device_state')
-      .select('last_fed_at')
-      .eq('id', '00000000-0000-0000-0000-000000000001')
-      .single();
 
-    if (fetchError) return res.status(500).json({ error: fetchError.message });
-
-    // 2. Recalculate next_feeding_at if interval changed
-    if (interval) {
-        const intervalMs = parseIntervalToMs(interval);
-        const lastFed = new Date(device.last_fed_at || new Date());
-        let newNext = new Date(lastFed.getTime() + intervalMs);
-        const now = new Date();
-
-        // Catch-up logic: ensure newNext is in the future
-        while (newNext <= now) {
-            newNext = new Date(newNext.getTime() + intervalMs);
-        }
-        updates.next_feeding_at = newNext;
-    }
 
     // 3. Update settings and schedule
     const { error: dbError } = await supabase
@@ -256,10 +241,47 @@ router.post("/feeding-settings", requireAdmin, async (req, res) => {
 
     if (queueError) return res.status(500).json({ error: queueError.message });
 
-    res.json({ success: true, next_feeding_at: updates.next_feeding_at });
+    res.json({ success: true, message: "Settings updated for future cycles" });
 
   } catch (err) {
     console.error("Update Feeding Settings Error:", err);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// Endpoint for Device to confirm it just fed automatically
+router.post("/confirm-feed", async (req, res) => {
+  try {
+    // 1. Get current interval
+    const { data: device, error: fetchError } = await supabase
+      .from('device_state')
+      .select('feeding_interval')
+      .eq('id', '00000000-0000-0000-0000-000000000001')
+      .single();
+
+    if (fetchError) return res.status(500).json({ error: fetchError.message });
+
+    // 2. Calculate next feeding
+    const intervalMs = parseIntervalToMs(device.feeding_interval);
+    const now = new Date();
+    const newNext = new Date(now.getTime() + intervalMs);
+
+    // 3. Update State
+    const { error: dbError } = await supabase
+      .from('device_state')
+      .update({ 
+        last_fed_at: now,
+        next_feeding_at: newNext
+      })
+      .eq('id', '00000000-0000-0000-0000-000000000001');
+
+    if (dbError) return res.status(500).json({ error: dbError.message });
+
+    console.log(`Feeding confirmed by device. Next feeding at: ${newNext.toISOString()}`);
+    res.json({ success: true, next_feeding_at: newNext });
+
+  } catch (err) {
+    console.error("Confirm Feed Error:", err);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
