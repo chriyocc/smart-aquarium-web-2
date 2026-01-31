@@ -121,7 +121,7 @@ router.post("/pump", requireAdmin, async (req, res) => {
 
   const { error: queueError } = await supabase
     .from('command_queue')
-    .insert([{ type: 'PUMP', value: state }]);
+    .insert([{ type: 'PUMP', value: state ? 'ON' : 'OFF' }]);
 
   if (queueError) {
     return res.status(500).json({ error: queueError.message });

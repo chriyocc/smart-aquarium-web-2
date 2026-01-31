@@ -129,7 +129,7 @@ router.post("/upload", async (req, res) => {
         await cancelPendingCommands('PUMP');
         await supabase
           .from('command_queue')
-          .insert([{ type: 'PUMP', value: true }]);
+          .insert([{ type: 'PUMP', value: 'ON' }]);
       }
     } catch (err) {
       console.error("Auto-Pump Check Error:", err);
