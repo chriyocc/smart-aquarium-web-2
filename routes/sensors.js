@@ -110,13 +110,31 @@ router.post("/upload", async (req, res) => {
   // This allows the ESP32/8051 to tell the server its current state (e.g. auto-pump ON)
   // without triggering a command loop.
   if (pump_active !== undefined) {
-    // Convert "ON"/"OFF" to boolean if string, or keep boolean
-    const isActive = (pump_active === 'ON' || pump_active === true);
+    // RACE CONDITION PROTECTION:
+    // If the user just sent a command, the device might still be reporting the OLD state 
+    // before it receives the new command. We must ignore the device's report if there's 
+    // a pending or recently processed command.
+    
+    const protectionWindow = new Date(Date.now() - 10 * 1000); // 10 seconds ago
 
-    await supabase
-      .from('device_state')
-      .update({ pump_active: isActive })
-      .eq('id', '00000000-0000-0000-0000-000000000001');
+    const { data: recentCommands } = await supabase
+      .from('command_queue')
+      .select('id')
+      .eq('type', 'PUMP')
+      .or(`processed.eq.false,processed_at.gt.${protectionWindow.toISOString()}`)
+      .limit(1);
+
+    if (recentCommands && recentCommands.length > 0) {
+      console.log("Ignoring pump state sync from device to avoid race condition (Recently commanded).");
+    } else {
+      // Safe to update
+      const isActive = (pump_active === 'ON' || pump_active === true);
+
+      await supabase
+        .from('device_state')
+        .update({ pump_active: isActive })
+        .eq('id', '00000000-0000-0000-0000-000000000001');
+    }
   }
 
   res.json({ success: true });
