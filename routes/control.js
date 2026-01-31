@@ -103,12 +103,19 @@ router.get("/latest", async (req, res) => {
 });
 
 router.post("/pump", requireAdmin, async (req, res) => {
-  const { state } = req.body; // true/false
+  const { state } = req.body; 
 
-  // 1. Update DB State
+  // Normalize state to "ON" or "OFF"
+  // Frontend sends "ON"/"OFF" string now, but we handle boolean just in case
+  let targetValue = 'OFF';
+  if (state === 'ON' || state === true) {
+    targetValue = 'ON';
+  }
+
+  // 1. Update DB State (DB expects boolean)
   const { error: dbError } = await supabase
     .from('device_state')
-    .update({ pump_active: state })
+    .update({ pump_active: (targetValue === 'ON') })
     .eq('id', '00000000-0000-0000-0000-000000000001');
 
   if (dbError) {
@@ -121,7 +128,7 @@ router.post("/pump", requireAdmin, async (req, res) => {
 
   const { error: queueError } = await supabase
     .from('command_queue')
-    .insert([{ type: 'PUMP', value: state ? 'ON' : 'OFF' }]);
+    .insert([{ type: 'PUMP', value: targetValue }]);
 
   if (queueError) {
     return res.status(500).json({ error: queueError.message });
@@ -129,7 +136,7 @@ router.post("/pump", requireAdmin, async (req, res) => {
 
   res.json({
     status: "queued",
-    command: { type: "PUMP", value: state }
+    command: { type: "PUMP", value: targetValue }
   });
 });
 
