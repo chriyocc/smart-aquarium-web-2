@@ -93,7 +93,7 @@ const cancelPendingCommands = async (type) => {
 };
 
 router.post("/upload", async (req, res) => {
-  const { temperature } = req.body;
+  const { temperature, pump_active } = req.body;
   
   // 1. Insert Sensor Reading
   const { error } = await supabase
@@ -106,35 +106,17 @@ router.post("/upload", async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 
-  // 2. Auto-Pump Logic (Threshold > 28°C)
-  if (temperature > 28.0) {
-    try {
-      // Check if pump is already ON to avoid spamming
-      const { data: device } = await supabase
-        .from('device_state')
-        .select('pump_active')
-        .eq('id', '00000000-0000-0000-0000-000000000001')
-        .single();
+  // 2. Sync Device State (If provided)
+  // This allows the ESP32/8051 to tell the server its current state (e.g. auto-pump ON)
+  // without triggering a command loop.
+  if (pump_active !== undefined) {
+    // Convert "ON"/"OFF" to boolean if string, or keep boolean
+    const isActive = (pump_active === 'ON' || pump_active === true);
 
-      if (device && !device.pump_active) {
-        console.log(`Temp ${temperature}°C > 28°C. Auto-activating pump.`);
-
-        // A. Update State
-        await supabase
-          .from('device_state')
-          .update({ pump_active: true })
-          .eq('id', '00000000-0000-0000-0000-000000000001');
-
-        // B. Queue Command
-        await cancelPendingCommands('PUMP');
-        await supabase
-          .from('command_queue')
-          .insert([{ type: 'PUMP', value: 'ON' }]);
-      }
-    } catch (err) {
-      console.error("Auto-Pump Check Error:", err);
-      // Don't fail the upload just because auto-logic failed
-    }
+    await supabase
+      .from('device_state')
+      .update({ pump_active: isActive })
+      .eq('id', '00000000-0000-0000-0000-000000000001');
   }
 
   res.json({ success: true });
